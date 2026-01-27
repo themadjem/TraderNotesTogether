@@ -1,0 +1,14 @@
+{
+  "type": "code",
+  "modid": "tradernotestogether",
+  "name": "Trader Notes Together",
+  "description": "Share Trader Notes with others in your world.",
+  "authors": [
+    "themadjem"
+  ],
+  "version": "0.0.1",
+  "dependencies": {
+    "game": "1.21.6",
+    "tradernotes": ""
+  }
+}
