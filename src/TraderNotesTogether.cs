@@ -23,13 +23,13 @@ namespace TraderNotesTogether
         public override void Start(ICoreAPI api)
         {
             base.Start(api);
-            api.World.Logger.Notification("Trader Notes Together Mod Systems Started!");
+            api.World.Logger.Notification(LogUtil.ModMessage("ModSystem started!"));
         }
 
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
-
+            sapi.World.Logger.Debug(LogUtil.ModMessage("Starting server side"));
             serverChannel = api
                 .Network.RegisterChannel("tradernotestogether")
                 .RegisterMessageType<TraderUpdatePacket>()
@@ -43,6 +43,7 @@ namespace TraderNotesTogether
 
         private void OnPlayerJoin(IServerPlayer player)
         {
+            sapi.World.Logger.Debug(LogUtil.ModMessage($"Player {player.PlayerName} joined"));
             if (!CanReceive(player))
                 return;
             var snapshots = cacheStore.Cache.Values.Select(TraderSnapshot.FromSavedTrader).ToList();
@@ -51,6 +52,11 @@ namespace TraderNotesTogether
 
         private void OnTraderUpdateFromClient(IServerPlayer fromPlayer, TraderUpdatePacket packet)
         {
+            sapi.World.Logger.Debug(
+                LogUtil.ModMessage(
+                    $"Received update from {fromPlayer.PlayerName} for trader {packet.Trader.EntityId}"
+                )
+            );
             if (!CanShare(fromPlayer))
                 return;
             long EntityId = packet.Trader.EntityId;
@@ -67,10 +73,11 @@ namespace TraderNotesTogether
         public override void StartClientSide(ICoreClientAPI api)
         {
             capi = api;
+            capi.World.Logger.Debug(LogUtil.ModMessage("Starting Client side"));
             if (capi.IsSinglePlayer)
             {
                 capi.Logger.Debug(
-                    "[TraderNotesTogether] Single-player detected, networking disabled."
+                    LogUtil.ModMessage("Single-player detected, networking disabled.")
                 );
                 return;
             }
@@ -93,11 +100,19 @@ namespace TraderNotesTogether
 
         private void OnTraderUpdateFromServer(TraderSyncPacket packet)
         {
+            capi.Logger.Debug(
+                LogUtil.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
+            );
             TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
         }
 
         private void OnTraderUpdateFromServer(TraderBulkSyncPacket packet)
         {
+            capi.Logger.Debug(
+                LogUtil.ModMessage(
+                    $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
+                )
+            );
             foreach (TraderSnapshot trader in packet.Traders)
             {
                 if (
@@ -115,12 +130,18 @@ namespace TraderNotesTogether
 
         private void SendTraderUpdateToServer(SavedTrader trader)
         {
+            capi.Logger.Debug($"Sending update for trader {trader.EntityId}");
             var packet = new TraderUpdatePacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
             clientChannel.SendPacket(packet);
         }
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
         {
+            sapi.Logger.Debug(
+                LogUtil.ModMessage(
+                    $"Sending update for trader {trader.EntityId} to {toPlayer.PlayerName}"
+                )
+            );
             var packet = new TraderSyncPacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
             if (!CanReceive(toPlayer))
                 return;
@@ -142,12 +163,18 @@ namespace TraderNotesTogether
 
         public bool CanShare(IPlayer player)
         {
-            return player.Role.Privileges.Contains("sendtradernotes");
+            bool share = player.Role.Privileges.Contains("sharetradernotes");
+            string verb = share ? "can" : "cannot";
+            sapi.Logger.Debug($"Player {player.PlayerName} {verb} share notes");
+            return share;
         }
 
         public bool CanReceive(IPlayer player)
         {
-            return player.Role.Privileges.Contains("recievetradernotes");
+            bool receive = player.Role.Privileges.Contains("receivetradernotes");
+            string verb = receive ? "can" : "cannot";
+            sapi.Logger.Debug($"Player {player.PlayerName} {verb} receive notes");
+            return receive;
         }
     }
 
@@ -408,6 +435,14 @@ namespace TraderNotesTogether
             }
 
             return snapshot;
+        }
+    }
+
+    class LogUtil
+    {
+        internal static string ModMessage(string message)
+        {
+            return string.Concat("[TraderNotesTogether] ", message);
         }
     }
 }
