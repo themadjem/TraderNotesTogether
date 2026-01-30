@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
+using ProtoBuf;
 using TraderMapTooltip;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -44,10 +45,8 @@ namespace TraderNotesTogether
         {
             if (!CanReceive(player))
                 return;
-            serverChannel.SendPacket(
-                new TraderBulkSyncPacket { Traders = cacheStore.Cache.Values.ToList() },
-                player
-            );
+            var snapshots = cacheStore.Cache.Values.Select(TraderSnapshot.FromSavedTrader).ToList();
+            serverChannel.SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
         }
 
         private void OnTraderUpdateFromClient(IServerPlayer fromPlayer, TraderUpdatePacket packet)
@@ -62,7 +61,7 @@ namespace TraderNotesTogether
             )
                 return;
 
-            cacheStore.UpdateTrader(packet.Trader);
+            cacheStore.UpdateTrader(packet.Trader.ToSavedTrader());
         }
 
         public override void StartClientSide(ICoreClientAPI api)
@@ -94,18 +93,18 @@ namespace TraderNotesTogether
 
         private void OnTraderUpdateFromServer(TraderSyncPacket packet)
         {
-            TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader;
+            TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
         }
 
         private void OnTraderUpdateFromServer(TraderBulkSyncPacket packet)
         {
-            foreach (SavedTrader trader in packet.Traders)
+            foreach (TraderSnapshot trader in packet.Traders)
             {
                 if (
                     !TraderMapMod.Cache.TryGetValue(trader.EntityId, out var local)
                     || trader.LastUpdatedTotalDays > local.LastUpdatedTotalDays
                 )
-                    TraderMapMod.Cache[trader.EntityId] = trader;
+                    TraderMapMod.Cache[trader.EntityId] = trader.ToSavedTrader();
             }
         }
 
@@ -116,13 +115,13 @@ namespace TraderNotesTogether
 
         private void SendTraderUpdateToServer(SavedTrader trader)
         {
-            var packet = new TraderUpdatePacket { Trader = trader };
+            var packet = new TraderUpdatePacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
             clientChannel.SendPacket(packet);
         }
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
         {
-            var packet = new TraderSyncPacket { Trader = trader };
+            var packet = new TraderSyncPacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
             if (!CanReceive(toPlayer))
                 return;
 
@@ -131,7 +130,7 @@ namespace TraderNotesTogether
 
         private void SendTraderUpdateToClient(SavedTrader trader)
         {
-            var packet = new TraderSyncPacket { Trader = trader };
+            var packet = new TraderSyncPacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
             foreach (IServerPlayer player in sapi.World.AllOnlinePlayers)
             {
                 if (!CanReceive(player))
@@ -152,19 +151,25 @@ namespace TraderNotesTogether
         }
     }
 
+    [ProtoContract]
     public class TraderUpdatePacket
     {
-        public SavedTrader Trader;
+        [ProtoMember(1)]
+        public TraderSnapshot Trader;
     }
 
+    [ProtoContract]
     public class TraderSyncPacket
     {
-        public SavedTrader Trader;
+        [ProtoMember(1)]
+        public TraderSnapshot Trader;
     }
 
+    [ProtoContract]
     public class TraderBulkSyncPacket
     {
-        public List<SavedTrader> Traders;
+        [ProtoMember(1)]
+        public List<TraderSnapshot> Traders;
     }
 
     public class CacheObserver
@@ -250,6 +255,159 @@ namespace TraderNotesTogether
             if (TraderExists(entityId))
                 return Cache[entityId];
             return null;
+        }
+    }
+
+    [ProtoContract]
+    public class TraderItemSnapshot
+    {
+        [ProtoMember(1)]
+        public string Name;
+
+        [ProtoMember(2)]
+        public int Stock;
+
+        [ProtoMember(3)]
+        public int StackSize;
+
+        [ProtoMember(4)]
+        public int Price;
+
+        [ProtoMember(5)]
+        public bool IsSoldOut;
+    }
+
+    [ProtoContract]
+    public class TraderSnapshot
+    {
+        [ProtoMember(1)]
+        public string Name;
+
+        [ProtoMember(2)]
+        public string TraderType;
+
+        [ProtoMember(3)]
+        public long EntityId;
+
+        [ProtoMember(4)]
+        public int Money;
+
+        [ProtoMember(5)]
+        public bool IsDiscovered;
+
+        [ProtoMember(6)]
+        public double LastUpdatedTotalDays;
+
+        [ProtoMember(7)]
+        public double NextRefreshTotalDays;
+
+        [ProtoMember(8)]
+        public List<TraderItemSnapshot> Sells = new List<TraderItemSnapshot>();
+
+        [ProtoMember(9)]
+        public List<TraderItemSnapshot> Wants = new List<TraderItemSnapshot>();
+
+        [ProtoMember(10)]
+        public double X;
+
+        [ProtoMember(11)]
+        public double Y;
+
+        [ProtoMember(12)]
+        public double Z;
+
+        public SavedTrader ToSavedTrader()
+        {
+            var trader = new SavedTrader()
+            {
+                Name = this.Name,
+                TraderType = this.TraderType,
+                EntityId = this.EntityId,
+                Money = this.Money,
+                IsDiscovered = this.IsDiscovered,
+                LastUpdatedTotalDays = this.LastUpdatedTotalDays,
+                NextRefreshTotalDays = this.NextRefreshTotalDays,
+                X = this.X,
+                Y = this.Y,
+                Z = this.Z,
+            };
+
+            foreach (var item in this.Sells)
+            {
+                trader.Sells.Add(
+                    new CachedTradeItem
+                    {
+                        Name = item.Name,
+                        Stock = item.Stock,
+                        StackSize = item.StackSize,
+                        Price = item.Price,
+                        IsSoldOut = item.IsSoldOut,
+                    }
+                );
+            }
+
+            foreach (var item in this.Wants)
+            {
+                trader.Wants.Add(
+                    new CachedTradeItem
+                    {
+                        Name = item.Name,
+                        Stock = item.Stock,
+                        StackSize = item.StackSize,
+                        Price = item.Price,
+                        IsSoldOut = item.IsSoldOut,
+                    }
+                );
+            }
+
+            return trader;
+        }
+
+        public static TraderSnapshot FromSavedTrader(SavedTrader trader)
+        {
+            var snapshot = new TraderSnapshot
+            {
+                Name = trader.Name,
+                TraderType = trader.TraderType,
+                EntityId = trader.EntityId,
+                Money = trader.Money,
+                IsDiscovered = trader.IsDiscovered,
+                LastUpdatedTotalDays = trader.LastUpdatedTotalDays,
+                NextRefreshTotalDays = trader.NextRefreshTotalDays,
+                X = trader.X,
+                Y = trader.Y,
+                Z = trader.Z,
+            };
+
+            foreach (var item in trader.Sells)
+            {
+                snapshot.Sells.Add(
+                    new TraderItemSnapshot
+                    {
+                        Name = item.Name,
+                        Stock = item.Stock,
+                        StackSize = item.StackSize,
+                        Price = item.Price,
+                        IsSoldOut = item.IsSoldOut,
+                    }
+                );
+            }
+
+            foreach (var item in trader.Wants)
+            {
+                snapshot.Wants.Add(
+                    new TraderItemSnapshot
+                    {
+                        Name = item.Name,
+                        Stock = item.Stock,
+                        StackSize = item.StackSize,
+                        Price = item.Price,
+                        IsSoldOut = item.IsSoldOut,
+                    }
+                );
+            }
+
+            return snapshot;
         }
     }
 }

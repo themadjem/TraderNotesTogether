@@ -18,6 +18,7 @@ build-debug
 build-release
 test-release
 .editorconfig
+upload
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

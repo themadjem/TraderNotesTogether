@@ -17,6 +17,7 @@
     </Reference>
     <Reference Include="tradernotes">
       <HintPath>$(VS_MODDING)/Reference/TraderNotes/TraderNotes.dll</HintPath>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
 
@@ -34,6 +35,7 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="protobuf-net" Version="3.2.56" />
   </ItemGroup>
 
 </Project>
