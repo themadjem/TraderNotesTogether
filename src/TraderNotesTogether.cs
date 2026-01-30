@@ -39,15 +39,31 @@ namespace TraderNotesTogether
 
             api.Event.PlayerJoin += OnPlayerJoin;
             cacheStore = new ServerCacheStore(api);
+            sapi.World.Logger.Debug(LogUtil.ModMessage("Server side startup complete"));
         }
 
         private void OnPlayerJoin(IServerPlayer player)
         {
             sapi.World.Logger.Debug(LogUtil.ModMessage($"Player {player.PlayerName} joined"));
+            sapi.World.Logger.Debug(
+                LogUtil.ModMessage(
+                    $"Player Role ({player.Role.Name}) priv: {string.Join(",", player.Role.Privileges)}"
+                )
+            );
+            sapi.World.Logger.Debug(
+                LogUtil.ModMessage($"Player priv: {string.Join(",", player.Privileges)}")
+            );
             if (!CanReceive(player))
+            {
+                sapi.World.Logger.Debug(LogUtil.ModMessage("Player cannot receive updates"));
                 return;
+            }
             var snapshots = cacheStore.Cache.Values.Select(TraderSnapshot.FromSavedTrader).ToList();
-            serverChannel.SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
+            if (snapshots.Count > 0)
+            {
+                sapi.World.Logger.Debug(LogUtil.ModMessage("Sending player bulk update"));
+                serverChannel.SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
+            }
         }
 
         private void OnTraderUpdateFromClient(IServerPlayer fromPlayer, TraderUpdatePacket packet)
@@ -73,14 +89,16 @@ namespace TraderNotesTogether
         public override void StartClientSide(ICoreClientAPI api)
         {
             capi = api;
-            capi.World.Logger.Debug(LogUtil.ModMessage("Starting Client side"));
-            if (capi.IsSinglePlayer)
+            capi.Logger.Debug(LogUtil.ModMessage("Starting Client side"));
+            /*
+             * if (capi.IsSinglePlayer)
             {
                 capi.Logger.Debug(
                     LogUtil.ModMessage("Single-player detected, networking disabled.")
                 );
                 return;
             }
+            */
             clientChannel = api
                 .Network.RegisterChannel("tradernotestogether")
                 .RegisterMessageType<TraderUpdatePacket>()
@@ -89,13 +107,18 @@ namespace TraderNotesTogether
                 .SetMessageHandler<TraderSyncPacket>(OnTraderUpdateFromServer)
                 .SetMessageHandler<TraderBulkSyncPacket>(OnTraderUpdateFromServer);
 
-            cacheObserver = new CacheObserver();
+            cacheObserver = new CacheObserver(capi);
             cacheObserver.OnTraderUpdated += trader =>
             {
+                capi.Logger.Debug(LogUtil.ModMessage($"Update to trader {trader.EntityId}"));
                 SendTraderUpdateToServer(trader);
             };
-
-            api.Event.RegisterGameTickListener(OnClientTick, 1000);
+            if (cacheObserver.Equals(null))
+            {
+                capi.Logger.Error(LogUtil.ModMessage("Cache Observer not instantiated"));
+            }
+            capi.Event.RegisterGameTickListener(OnClientTick, 1000);
+            capi.Logger.Debug(LogUtil.ModMessage("Client startup completed"));
         }
 
         private void OnTraderUpdateFromServer(TraderSyncPacket packet)
@@ -125,7 +148,8 @@ namespace TraderNotesTogether
 
         private void OnClientTick(float dt)
         {
-            cacheObserver.Tick();
+            capi.Logger.Debug(LogUtil.ModMessage($"Client Tick {dt}"));
+            cacheObserver.Tick(dt);
         }
 
         private void SendTraderUpdateToServer(SavedTrader trader)
@@ -137,7 +161,7 @@ namespace TraderNotesTogether
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
         {
-            sapi.Logger.Debug(
+            sapi.World.Logger.Debug(
                 LogUtil.ModMessage(
                     $"Sending update for trader {trader.EntityId} to {toPlayer.PlayerName}"
                 )
@@ -163,17 +187,24 @@ namespace TraderNotesTogether
 
         public bool CanShare(IPlayer player)
         {
-            bool share = player.Role.Privileges.Contains("sharetradernotes");
+            string priv = "sharetradernotes";
+            bool share = player.Role.Privileges.Contains(priv) || player.Privileges.Contains(priv);
             string verb = share ? "can" : "cannot";
-            sapi.Logger.Debug($"Player {player.PlayerName} {verb} share notes");
+            sapi.World.Logger.Debug(
+                LogUtil.ModMessage($"Player {player.PlayerName} {verb} share notes")
+            );
             return share;
         }
 
         public bool CanReceive(IPlayer player)
         {
-            bool receive = player.Role.Privileges.Contains("receivetradernotes");
+            string priv = "receivetradernotes";
+            bool receive =
+                player.Role.Privileges.Contains(priv) || player.Privileges.Contains(priv);
             string verb = receive ? "can" : "cannot";
-            sapi.Logger.Debug($"Player {player.PlayerName} {verb} receive notes");
+            sapi.World.Logger.Debug(
+                LogUtil.ModMessage($"Player {player.PlayerName} {verb} receive notes")
+            );
             return receive;
         }
     }
@@ -201,12 +232,18 @@ namespace TraderNotesTogether
 
     public class CacheObserver
     {
+        private readonly ICoreClientAPI capi;
         private Dictionary<long, double> knownTraders = new();
-
         public Action<SavedTrader> OnTraderUpdated;
 
-        public void Tick()
+        public CacheObserver(ICoreClientAPI capi)
         {
+            this.capi = capi;
+        }
+
+        public void Tick(float dt)
+        {
+            capi.Logger.Debug(LogUtil.ModMessage("CacheObserver Tick"));
             foreach (var trader in TraderMapMod.Cache.Values.ToList())
             {
                 if (
@@ -442,7 +479,7 @@ namespace TraderNotesTogether
     {
         internal static string ModMessage(string message)
         {
-            return string.Concat("[TraderNotesTogether] ", message);
+            return string.Concat("[tradernotestogether] ", message);
         }
     }
 }
