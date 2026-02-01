@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json;
-using ProtoBuf;
 using TraderMapTooltip;
+using TraderNotesTogether.NetworkPackets;
 using TraderNotesTogether.ProtoTrader;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -16,6 +16,10 @@ namespace TraderNotesTogether
     {
         private ICoreClientAPI capi;
         private ICoreServerAPI sapi;
+
+        private IClientNetworkChannel clientChannel;
+        private IServerNetworkChannel serverChannel;
+
         private CacheObserver cacheObserver;
         private ServerCacheStore cacheStore;
 
@@ -25,48 +29,101 @@ namespace TraderNotesTogether
             api.Logger.Notification(Util.ModMessage("ModSystem started!"));
         }
 
+        #region ClientSide
+        public override void StartClientSide(ICoreClientAPI api)
+        {
+            capi = api;
+            capi.Logger.Notification(Util.ModMessage("Starting Client Logic..."));
+            clientChannel = capi
+                .Network.RegisterChannel(Util.Modid)
+                .RegisterMessageType<TraderUpdatePacket>()
+                .RegisterMessageType<TraderSyncPacket>()
+                .RegisterMessageType<TraderBulkSyncPacket>()
+                .SetMessageHandler<TraderSyncPacket>(OnTraderSyncFromServer)
+                .SetMessageHandler<TraderBulkSyncPacket>(OnTraderBulkSyncFromServer);
+
+            cacheObserver = new CacheObserver(capi);
+            capi.Event.RegisterGameTickListener(OnClientTick, 5000);
+        }
+
+        /// Called when the client receives an sync packet from the server
+        private void OnTraderSyncFromServer(TraderSyncPacket packet)
+        {
+            capi.World.Logger.Debug(
+                Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
+            );
+            TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
+        }
+
+        /// Called when the client receives a bulk sync packet from the server (usually on initially joining a world)
+        private void OnTraderBulkSyncFromServer(TraderBulkSyncPacket packet)
+        {
+            capi.World.Logger.Debug(
+                Util.ModMessage(
+                    $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
+                )
+            );
+            foreach (ProtoTraderEntity trader in packet.Traders)
+            {
+                if (
+                    !TraderMapMod.Cache.TryGetValue(trader.EntityId, out var local)
+                    || trader.LastUpdatedTotalDays > local.LastUpdatedTotalDays
+                )
+                    TraderMapMod.Cache[trader.EntityId] = trader.ToSavedTrader();
+            }
+        }
+
+        /// Called when the client processes a scheduled tick
+        private void OnClientTick(float dt)
+        {
+            capi.Logger.Debug(Util.ModMessage($"Client Tick {dt}"));
+            cacheObserver.Tick(dt);
+        }
+
+        private void SendTraderUpdateToServer(SavedTrader trader)
+        {
+            capi.Logger.Debug($"Sending update for trader {trader.EntityId}");
+            var packet = new TraderUpdatePacket
+            {
+                Trader = ProtoTraderEntity.FromSavedTrader(trader),
+            };
+            capi.Network.GetChannel(Util.Modid).SendPacket(packet);
+        }
+
+        #endregion
+        #region ServerSide
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
-            sapi.Logger.Debug(Util.ModMessage("Starting server side"));
-            sapi.Network.RegisterChannel("tradernotestogether")
+            sapi.Logger.Debug(Util.ModMessage("Starting Server Logic..."));
+            serverChannel = sapi
+                .Network.RegisterChannel(Util.Modid)
                 .RegisterMessageType<TraderUpdatePacket>()
                 .RegisterMessageType<TraderSyncPacket>()
                 .RegisterMessageType<TraderBulkSyncPacket>()
                 .SetMessageHandler<TraderUpdatePacket>(OnTraderUpdateFromClient);
 
             sapi.Event.PlayerJoin += OnPlayerJoin;
-            cacheStore = new ServerCacheStore(api);
+            cacheStore = new ServerCacheStore(sapi);
             sapi.Logger.Debug(Util.ModMessage("Server side startup complete"));
         }
 
+        /// Called when a player joins a world
         private void OnPlayerJoin(IServerPlayer player)
         {
             sapi.World.Logger.Debug(Util.ModMessage($"Player {player.PlayerName} joined"));
-            sapi.World.Logger.Debug(
-                Util.ModMessage(
-                    $"Player Role ({player.Role.Name}) priv: {string.Join(",", player.Role.Privileges)}"
-                )
-            );
-            sapi.World.Logger.Debug(
-                Util.ModMessage($"Player priv: {string.Join(",", player.Privileges)}")
-            );
             if (!CanReceive(player))
             {
-                sapi.World.Logger.Debug(Util.ModMessage("Player cannot receive updates"));
+                sapi.World.Logger.Debug(
+                    Util.ModMessage($"Player, {player.PlayerName}, cannot receive updates")
+                );
                 return;
             }
-            var snapshots = cacheStore
-                .Cache.Values.Select(ProtoTraderEntity.FromSavedTrader)
-                .ToList();
-            if (snapshots.Count > 0)
-            {
-                sapi.World.Logger.Debug(Util.ModMessage("Sending player bulk update"));
-                sapi.Network.GetChannel(Util.Modid)
-                    .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
-            }
+
+            //       SendBulkUpdateToPlayer(player);
         }
 
+        /// Called when the server receives an update packet from a client
         private void OnTraderUpdateFromClient(IServerPlayer fromPlayer, TraderUpdatePacket packet)
         {
             sapi.World.Logger.Debug(
@@ -85,73 +142,6 @@ namespace TraderNotesTogether
                 return;
 
             cacheStore.UpdateTrader(packet.Trader.ToSavedTrader());
-        }
-
-        public override void StartClientSide(ICoreClientAPI api)
-        {
-            capi = api;
-            capi.Logger.Debug(Util.ModMessage("Starting Client side"));
-
-            capi.Network.RegisterChannel("tradernotestogether")
-                .RegisterMessageType<TraderUpdatePacket>()
-                .RegisterMessageType<TraderSyncPacket>()
-                .RegisterMessageType<TraderBulkSyncPacket>()
-                .SetMessageHandler<TraderSyncPacket>(OnTraderUpdateFromServer)
-                .SetMessageHandler<TraderBulkSyncPacket>(OnTraderUpdateFromServer);
-
-            cacheObserver = new CacheObserver(capi);
-            cacheObserver.OnTraderUpdated += trader =>
-            {
-                capi.Logger.Debug(Util.ModMessage($"Update to trader {trader.EntityId}"));
-                SendTraderUpdateToServer(trader);
-            };
-            if (cacheObserver.Equals(null))
-            {
-                capi.Logger.Error(Util.ModMessage("Cache Observer not instantiated"));
-            }
-            capi.Event.RegisterGameTickListener(OnClientTick, 1000);
-            capi.Logger.Debug(Util.ModMessage("Client startup completed"));
-        }
-
-        private void OnTraderUpdateFromServer(TraderSyncPacket packet)
-        {
-            capi.World.Logger.Debug(
-                Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
-            );
-            TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
-        }
-
-        private void OnTraderUpdateFromServer(TraderBulkSyncPacket packet)
-        {
-            capi.World.Logger.Debug(
-                Util.ModMessage(
-                    $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
-                )
-            );
-            foreach (ProtoTraderEntity trader in packet.Traders)
-            {
-                if (
-                    !TraderMapMod.Cache.TryGetValue(trader.EntityId, out var local)
-                    || trader.LastUpdatedTotalDays > local.LastUpdatedTotalDays
-                )
-                    TraderMapMod.Cache[trader.EntityId] = trader.ToSavedTrader();
-            }
-        }
-
-        private void OnClientTick(float dt)
-        {
-            capi.Logger.Debug(Util.ModMessage($"Client Tick {dt}"));
-            cacheObserver.Tick(dt);
-        }
-
-        private void SendTraderUpdateToServer(SavedTrader trader)
-        {
-            capi.Logger.Debug($"Sending update for trader {trader.EntityId}");
-            var packet = new TraderUpdatePacket
-            {
-                Trader = ProtoTraderEntity.FromSavedTrader(trader),
-            };
-            capi.Network.GetChannel(Util.Modid).SendPacket(packet);
         }
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
@@ -186,6 +176,19 @@ namespace TraderNotesTogether
             }
         }
 
+        public void SendBulkUpdateToPlayer(IServerPlayer player)
+        {
+            var snapshots = cacheStore
+                .Cache.Values.Select(ProtoTraderEntity.FromSavedTrader)
+                .ToList();
+            if (snapshots.Count > 0)
+            {
+                sapi.World.Logger.Debug(Util.ModMessage("Sending player bulk update"));
+                sapi.Network.GetChannel(Util.Modid)
+                    .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
+            }
+        }
+
         public bool CanShare(IPlayer player)
         {
             string priv = "sharetradernotes";
@@ -208,27 +211,7 @@ namespace TraderNotesTogether
             );
             return receive;
         }
-    }
-
-    [ProtoContract]
-    public class TraderUpdatePacket
-    {
-        [ProtoMember(1)]
-        public ProtoTraderEntity Trader;
-    }
-
-    [ProtoContract]
-    public class TraderSyncPacket
-    {
-        [ProtoMember(1)]
-        public ProtoTraderEntity Trader;
-    }
-
-    [ProtoContract]
-    public class TraderBulkSyncPacket
-    {
-        [ProtoMember(1)]
-        public List<ProtoTraderEntity> Traders;
+        #endregion
     }
 
     public class CacheObserver
@@ -245,6 +228,12 @@ namespace TraderNotesTogether
         public void Tick(float dt)
         {
             capi.Logger.Debug(Util.ModMessage("CacheObserver Tick"));
+            var cache = TraderMapMod.Cache;
+            if (cache == null)
+            {
+                capi.Logger.Error(Util.ModMessage("Null cache from TraderMapMod"));
+                return;
+            }
             foreach (var trader in TraderMapMod.Cache.Values.ToList())
             {
                 if (
