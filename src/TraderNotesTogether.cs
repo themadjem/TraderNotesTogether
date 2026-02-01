@@ -5,6 +5,7 @@ using System.Linq;
 using Newtonsoft.Json;
 using ProtoBuf;
 using TraderMapTooltip;
+using TraderNotesTogether.ProtoTrader;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
@@ -55,7 +56,9 @@ namespace TraderNotesTogether
                 sapi.World.Logger.Debug(Util.ModMessage("Player cannot receive updates"));
                 return;
             }
-            var snapshots = cacheStore.Cache.Values.Select(TraderSnapshot.FromSavedTrader).ToList();
+            var snapshots = cacheStore
+                .Cache.Values.Select(ProtoTraderEntity.FromSavedTrader)
+                .ToList();
             if (snapshots.Count > 0)
             {
                 sapi.World.Logger.Debug(Util.ModMessage("Sending player bulk update"));
@@ -125,7 +128,7 @@ namespace TraderNotesTogether
                     $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
                 )
             );
-            foreach (TraderSnapshot trader in packet.Traders)
+            foreach (ProtoTraderEntity trader in packet.Traders)
             {
                 if (
                     !TraderMapMod.Cache.TryGetValue(trader.EntityId, out var local)
@@ -144,7 +147,10 @@ namespace TraderNotesTogether
         private void SendTraderUpdateToServer(SavedTrader trader)
         {
             capi.Logger.Debug($"Sending update for trader {trader.EntityId}");
-            var packet = new TraderUpdatePacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
+            var packet = new TraderUpdatePacket
+            {
+                Trader = ProtoTraderEntity.FromSavedTrader(trader),
+            };
             capi.Network.GetChannel(Util.Modid).SendPacket(packet);
         }
 
@@ -155,7 +161,10 @@ namespace TraderNotesTogether
                     $"Sending update for trader {trader.EntityId} to {toPlayer.PlayerName}"
                 )
             );
-            var packet = new TraderSyncPacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
+            var packet = new TraderSyncPacket
+            {
+                Trader = ProtoTraderEntity.FromSavedTrader(trader),
+            };
             if (!CanReceive(toPlayer))
                 return;
 
@@ -164,7 +173,10 @@ namespace TraderNotesTogether
 
         private void SendTraderUpdateToClient(SavedTrader trader)
         {
-            var packet = new TraderSyncPacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
+            var packet = new TraderSyncPacket
+            {
+                Trader = ProtoTraderEntity.FromSavedTrader(trader),
+            };
             foreach (IServerPlayer player in sapi.World.AllOnlinePlayers)
             {
                 if (!CanReceive(player))
@@ -202,21 +214,21 @@ namespace TraderNotesTogether
     public class TraderUpdatePacket
     {
         [ProtoMember(1)]
-        public TraderSnapshot Trader;
+        public ProtoTraderEntity Trader;
     }
 
     [ProtoContract]
     public class TraderSyncPacket
     {
         [ProtoMember(1)]
-        public TraderSnapshot Trader;
+        public ProtoTraderEntity Trader;
     }
 
     [ProtoContract]
     public class TraderBulkSyncPacket
     {
         [ProtoMember(1)]
-        public List<TraderSnapshot> Traders;
+        public List<ProtoTraderEntity> Traders;
     }
 
     public class CacheObserver
@@ -308,159 +320,6 @@ namespace TraderNotesTogether
             if (TraderExists(entityId))
                 return Cache[entityId];
             return null;
-        }
-    }
-
-    [ProtoContract]
-    public class TraderItemSnapshot
-    {
-        [ProtoMember(1)]
-        public string Name;
-
-        [ProtoMember(2)]
-        public int Stock;
-
-        [ProtoMember(3)]
-        public int StackSize;
-
-        [ProtoMember(4)]
-        public int Price;
-
-        [ProtoMember(5)]
-        public bool IsSoldOut;
-    }
-
-    [ProtoContract]
-    public class TraderSnapshot
-    {
-        [ProtoMember(1)]
-        public string Name;
-
-        [ProtoMember(2)]
-        public string TraderType;
-
-        [ProtoMember(3)]
-        public long EntityId;
-
-        [ProtoMember(4)]
-        public int Money;
-
-        [ProtoMember(5)]
-        public bool IsDiscovered;
-
-        [ProtoMember(6)]
-        public double LastUpdatedTotalDays;
-
-        [ProtoMember(7)]
-        public double NextRefreshTotalDays;
-
-        [ProtoMember(8)]
-        public List<TraderItemSnapshot> Sells = new List<TraderItemSnapshot>();
-
-        [ProtoMember(9)]
-        public List<TraderItemSnapshot> Wants = new List<TraderItemSnapshot>();
-
-        [ProtoMember(10)]
-        public double X;
-
-        [ProtoMember(11)]
-        public double Y;
-
-        [ProtoMember(12)]
-        public double Z;
-
-        public SavedTrader ToSavedTrader()
-        {
-            var trader = new SavedTrader()
-            {
-                Name = this.Name,
-                TraderType = this.TraderType,
-                EntityId = this.EntityId,
-                Money = this.Money,
-                IsDiscovered = this.IsDiscovered,
-                LastUpdatedTotalDays = this.LastUpdatedTotalDays,
-                NextRefreshTotalDays = this.NextRefreshTotalDays,
-                X = this.X,
-                Y = this.Y,
-                Z = this.Z,
-            };
-
-            foreach (var item in this.Sells)
-            {
-                trader.Sells.Add(
-                    new CachedTradeItem
-                    {
-                        Name = item.Name,
-                        Stock = item.Stock,
-                        StackSize = item.StackSize,
-                        Price = item.Price,
-                        IsSoldOut = item.IsSoldOut,
-                    }
-                );
-            }
-
-            foreach (var item in this.Wants)
-            {
-                trader.Wants.Add(
-                    new CachedTradeItem
-                    {
-                        Name = item.Name,
-                        Stock = item.Stock,
-                        StackSize = item.StackSize,
-                        Price = item.Price,
-                        IsSoldOut = item.IsSoldOut,
-                    }
-                );
-            }
-
-            return trader;
-        }
-
-        public static TraderSnapshot FromSavedTrader(SavedTrader trader)
-        {
-            var snapshot = new TraderSnapshot
-            {
-                Name = trader.Name,
-                TraderType = trader.TraderType,
-                EntityId = trader.EntityId,
-                Money = trader.Money,
-                IsDiscovered = trader.IsDiscovered,
-                LastUpdatedTotalDays = trader.LastUpdatedTotalDays,
-                NextRefreshTotalDays = trader.NextRefreshTotalDays,
-                X = trader.X,
-                Y = trader.Y,
-                Z = trader.Z,
-            };
-
-            foreach (var item in trader.Sells)
-            {
-                snapshot.Sells.Add(
-                    new TraderItemSnapshot
-                    {
-                        Name = item.Name,
-                        Stock = item.Stock,
-                        StackSize = item.StackSize,
-                        Price = item.Price,
-                        IsSoldOut = item.IsSoldOut,
-                    }
-                );
-            }
-
-            foreach (var item in trader.Wants)
-            {
-                snapshot.Wants.Add(
-                    new TraderItemSnapshot
-                    {
-                        Name = item.Name,
-                        Stock = item.Stock,
-                        StackSize = item.StackSize,
-                        Price = item.Price,
-                        IsSoldOut = item.IsSoldOut,
-                    }
-                );
-            }
-
-            return snapshot;
         }
     }
 
