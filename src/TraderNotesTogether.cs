@@ -15,61 +15,59 @@ namespace TraderNotesTogether
     {
         private ICoreClientAPI capi;
         private ICoreServerAPI sapi;
-        private IServerNetworkChannel serverChannel;
-        private IClientNetworkChannel clientChannel;
         private CacheObserver cacheObserver;
         private ServerCacheStore cacheStore;
 
         public override void Start(ICoreAPI api)
         {
             base.Start(api);
-            api.World.Logger.Notification(LogUtil.ModMessage("ModSystem started!"));
+            api.Logger.Notification(Util.ModMessage("ModSystem started!"));
         }
 
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
-            sapi.World.Logger.Debug(LogUtil.ModMessage("Starting server side"));
-            serverChannel = api
-                .Network.RegisterChannel("tradernotestogether")
+            sapi.Logger.Debug(Util.ModMessage("Starting server side"));
+            sapi.Network.RegisterChannel("tradernotestogether")
                 .RegisterMessageType<TraderUpdatePacket>()
                 .RegisterMessageType<TraderSyncPacket>()
                 .RegisterMessageType<TraderBulkSyncPacket>()
                 .SetMessageHandler<TraderUpdatePacket>(OnTraderUpdateFromClient);
 
-            api.Event.PlayerJoin += OnPlayerJoin;
+            sapi.Event.PlayerJoin += OnPlayerJoin;
             cacheStore = new ServerCacheStore(api);
-            sapi.World.Logger.Debug(LogUtil.ModMessage("Server side startup complete"));
+            sapi.Logger.Debug(Util.ModMessage("Server side startup complete"));
         }
 
         private void OnPlayerJoin(IServerPlayer player)
         {
-            sapi.World.Logger.Debug(LogUtil.ModMessage($"Player {player.PlayerName} joined"));
+            sapi.World.Logger.Debug(Util.ModMessage($"Player {player.PlayerName} joined"));
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage(
+                Util.ModMessage(
                     $"Player Role ({player.Role.Name}) priv: {string.Join(",", player.Role.Privileges)}"
                 )
             );
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage($"Player priv: {string.Join(",", player.Privileges)}")
+                Util.ModMessage($"Player priv: {string.Join(",", player.Privileges)}")
             );
             if (!CanReceive(player))
             {
-                sapi.World.Logger.Debug(LogUtil.ModMessage("Player cannot receive updates"));
+                sapi.World.Logger.Debug(Util.ModMessage("Player cannot receive updates"));
                 return;
             }
             var snapshots = cacheStore.Cache.Values.Select(TraderSnapshot.FromSavedTrader).ToList();
             if (snapshots.Count > 0)
             {
-                sapi.World.Logger.Debug(LogUtil.ModMessage("Sending player bulk update"));
-                serverChannel.SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
+                sapi.World.Logger.Debug(Util.ModMessage("Sending player bulk update"));
+                sapi.Network.GetChannel(Util.Modid)
+                    .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
             }
         }
 
         private void OnTraderUpdateFromClient(IServerPlayer fromPlayer, TraderUpdatePacket packet)
         {
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage(
+                Util.ModMessage(
                     $"Received update from {fromPlayer.PlayerName} for trader {packet.Trader.EntityId}"
                 )
             );
@@ -89,18 +87,9 @@ namespace TraderNotesTogether
         public override void StartClientSide(ICoreClientAPI api)
         {
             capi = api;
-            capi.Logger.Debug(LogUtil.ModMessage("Starting Client side"));
-            /*
-             * if (capi.IsSinglePlayer)
-            {
-                capi.Logger.Debug(
-                    LogUtil.ModMessage("Single-player detected, networking disabled.")
-                );
-                return;
-            }
-            */
-            clientChannel = api
-                .Network.RegisterChannel("tradernotestogether")
+            capi.Logger.Debug(Util.ModMessage("Starting Client side"));
+
+            capi.Network.RegisterChannel("tradernotestogether")
                 .RegisterMessageType<TraderUpdatePacket>()
                 .RegisterMessageType<TraderSyncPacket>()
                 .RegisterMessageType<TraderBulkSyncPacket>()
@@ -110,29 +99,29 @@ namespace TraderNotesTogether
             cacheObserver = new CacheObserver(capi);
             cacheObserver.OnTraderUpdated += trader =>
             {
-                capi.Logger.Debug(LogUtil.ModMessage($"Update to trader {trader.EntityId}"));
+                capi.Logger.Debug(Util.ModMessage($"Update to trader {trader.EntityId}"));
                 SendTraderUpdateToServer(trader);
             };
             if (cacheObserver.Equals(null))
             {
-                capi.Logger.Error(LogUtil.ModMessage("Cache Observer not instantiated"));
+                capi.Logger.Error(Util.ModMessage("Cache Observer not instantiated"));
             }
             capi.Event.RegisterGameTickListener(OnClientTick, 1000);
-            capi.Logger.Debug(LogUtil.ModMessage("Client startup completed"));
+            capi.Logger.Debug(Util.ModMessage("Client startup completed"));
         }
 
         private void OnTraderUpdateFromServer(TraderSyncPacket packet)
         {
-            capi.Logger.Debug(
-                LogUtil.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
+            capi.World.Logger.Debug(
+                Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
             );
             TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
         }
 
         private void OnTraderUpdateFromServer(TraderBulkSyncPacket packet)
         {
-            capi.Logger.Debug(
-                LogUtil.ModMessage(
+            capi.World.Logger.Debug(
+                Util.ModMessage(
                     $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
                 )
             );
@@ -148,7 +137,7 @@ namespace TraderNotesTogether
 
         private void OnClientTick(float dt)
         {
-            capi.Logger.Debug(LogUtil.ModMessage($"Client Tick {dt}"));
+            capi.Logger.Debug(Util.ModMessage($"Client Tick {dt}"));
             cacheObserver.Tick(dt);
         }
 
@@ -156,13 +145,13 @@ namespace TraderNotesTogether
         {
             capi.Logger.Debug($"Sending update for trader {trader.EntityId}");
             var packet = new TraderUpdatePacket { Trader = TraderSnapshot.FromSavedTrader(trader) };
-            clientChannel.SendPacket(packet);
+            capi.Network.GetChannel(Util.Modid).SendPacket(packet);
         }
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
         {
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage(
+                Util.ModMessage(
                     $"Sending update for trader {trader.EntityId} to {toPlayer.PlayerName}"
                 )
             );
@@ -170,7 +159,7 @@ namespace TraderNotesTogether
             if (!CanReceive(toPlayer))
                 return;
 
-            serverChannel.SendPacket(packet, toPlayer);
+            sapi.Network.GetChannel(Util.Modid).SendPacket(packet, toPlayer);
         }
 
         private void SendTraderUpdateToClient(SavedTrader trader)
@@ -181,7 +170,7 @@ namespace TraderNotesTogether
                 if (!CanReceive(player))
                     continue;
 
-                serverChannel.SendPacket(packet, player);
+                sapi.Network.GetChannel(Util.Modid).SendPacket(packet, player);
             }
         }
 
@@ -191,7 +180,7 @@ namespace TraderNotesTogether
             bool share = player.Role.Privileges.Contains(priv) || player.Privileges.Contains(priv);
             string verb = share ? "can" : "cannot";
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage($"Player {player.PlayerName} {verb} share notes")
+                Util.ModMessage($"Player {player.PlayerName} {verb} share notes")
             );
             return share;
         }
@@ -203,7 +192,7 @@ namespace TraderNotesTogether
                 player.Role.Privileges.Contains(priv) || player.Privileges.Contains(priv);
             string verb = receive ? "can" : "cannot";
             sapi.World.Logger.Debug(
-                LogUtil.ModMessage($"Player {player.PlayerName} {verb} receive notes")
+                Util.ModMessage($"Player {player.PlayerName} {verb} receive notes")
             );
             return receive;
         }
@@ -243,7 +232,7 @@ namespace TraderNotesTogether
 
         public void Tick(float dt)
         {
-            capi.Logger.Debug(LogUtil.ModMessage("CacheObserver Tick"));
+            capi.Logger.Debug(Util.ModMessage("CacheObserver Tick"));
             foreach (var trader in TraderMapMod.Cache.Values.ToList())
             {
                 if (
@@ -475,11 +464,13 @@ namespace TraderNotesTogether
         }
     }
 
-    class LogUtil
+    class Util
     {
+        internal const string Modid = "tradernotestogether";
+
         internal static string ModMessage(string message)
         {
-            return string.Concat("[tradernotestogether] ", message);
+            return string.Concat($"[{Modid}] ", message);
         }
     }
 }
