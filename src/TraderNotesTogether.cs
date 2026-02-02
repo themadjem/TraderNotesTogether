@@ -124,7 +124,7 @@ namespace TraderNotesTogether
                 return;
             }
 
-            //       SendBulkUpdateToPlayer(player);
+            SendBulkUpdateToPlayer(player);
         }
 
         /// Called when the server receives an update packet from a client
