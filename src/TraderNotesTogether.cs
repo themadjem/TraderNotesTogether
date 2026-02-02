@@ -95,7 +95,7 @@ namespace TraderNotesTogether
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
-            sapi.Logger.Debug(Util.ModMessage("Starting Server Logic..."));
+            sapi.Logger.Notification(Util.ModMessage("Starting Server Logic..."));
             serverChannel = sapi
                 .Network.RegisterChannel(Util.Modid)
                 .RegisterMessageType<TraderUpdatePacket>()
@@ -234,13 +234,19 @@ namespace TraderNotesTogether
                 capi.Logger.Error(Util.ModMessage("Null cache from TraderMapMod"));
                 return;
             }
-            foreach (var trader in TraderMapMod.Cache.Values.ToList())
+            if (cache.Count == 0)
             {
+                capi.Logger.Debug(Util.ModMessage("TraderMapMod cache empty"));
+            }
+            foreach (var trader in cache.Values.ToList())
+            {
+                capi.Logger.Debug($"Checking trader {trader.EntityId}");
                 if (
                     !knownTraders.TryGetValue(trader.EntityId, out var last)
                     || trader.LastUpdatedTotalDays > last
                 )
                 {
+                    capi.Logger.Debug(Util.ModMessage("Updated Trader Found"));
                     knownTraders[trader.EntityId] = trader.LastUpdatedTotalDays;
                     OnTraderUpdated?.Invoke(trader);
                 }
