@@ -43,6 +43,10 @@ namespace TraderNotesTogether
                 .SetMessageHandler<TraderBulkSyncPacket>(OnTraderBulkSyncFromServer);
 
             cacheObserver = new CacheObserver(capi);
+            cacheObserver.OnTraderUpdated += trader =>
+            {
+                SendTraderUpdateToServer(trader);
+            };
             capi.Event.RegisterGameTickListener(OnClientTick, 5000);
         }
 
@@ -142,6 +146,7 @@ namespace TraderNotesTogether
                 return;
 
             cacheStore.UpdateTrader(packet.Trader.ToSavedTrader());
+            SendTraderUpdateToClient(packet.Trader.ToSavedTrader());
         }
 
         private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
@@ -183,7 +188,9 @@ namespace TraderNotesTogether
                 .ToList();
             if (snapshots.Count > 0)
             {
-                sapi.World.Logger.Debug(Util.ModMessage("Sending player bulk update"));
+                sapi.World.Logger.Debug(
+                    Util.ModMessage($"Sending {player.PlayerName} bulk update")
+                );
                 sapi.Network.GetChannel(Util.Modid)
                     .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
             }
@@ -227,26 +234,19 @@ namespace TraderNotesTogether
 
         public void Tick(float dt)
         {
-            capi.Logger.Debug(Util.ModMessage("CacheObserver Tick"));
             var cache = TraderMapMod.Cache;
             if (cache == null)
             {
-                capi.Logger.Error(Util.ModMessage("Null cache from TraderMapMod"));
                 return;
-            }
-            if (cache.Count == 0)
-            {
-                capi.Logger.Debug(Util.ModMessage("TraderMapMod cache empty"));
             }
             foreach (var trader in cache.Values.ToList())
             {
-                capi.Logger.Debug($"Checking trader {trader.EntityId}");
                 if (
                     !knownTraders.TryGetValue(trader.EntityId, out var last)
                     || trader.LastUpdatedTotalDays > last
                 )
                 {
-                    capi.Logger.Debug(Util.ModMessage("Updated Trader Found"));
+                    capi.Logger.Debug(Util.ModMessage($"Trader {trader.EntityId} updated"));
                     knownTraders[trader.EntityId] = trader.LastUpdatedTotalDays;
                     OnTraderUpdated?.Invoke(trader);
                 }
