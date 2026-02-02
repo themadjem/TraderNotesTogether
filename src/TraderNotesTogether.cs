@@ -57,6 +57,9 @@ namespace TraderNotesTogether
                 Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
             );
             TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
+            capi.SendChatMessage(
+                $"Received update for {packet.Trader.Name} @ <{packet.Trader.X},{packet.Trader.Z}>"
+            );
         }
 
         /// Called when the client receives a bulk sync packet from the server (usually on initially joining a world)
@@ -67,6 +70,7 @@ namespace TraderNotesTogether
                     $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
                 )
             );
+            capi.SendChatMessage($"Received bulk update for {packet.Traders.Count} traders.");
             foreach (ProtoTraderEntity trader in packet.Traders)
             {
                 if (
@@ -96,6 +100,7 @@ namespace TraderNotesTogether
 
         #endregion
         #region ServerSide
+
         public override void StartServerSide(ICoreServerAPI api)
         {
             sapi = api;
@@ -124,7 +129,17 @@ namespace TraderNotesTogether
                 return;
             }
 
-            SendBulkUpdateToPlayer(player);
+            var snapshots = cacheStore
+                .Cache.Values.Select(ProtoTraderEntity.FromSavedTrader)
+                .ToList();
+            if (snapshots.Count > 0)
+            {
+                sapi.World.Logger.Debug(
+                    Util.ModMessage($"Sending {player.PlayerName} bulk update")
+                );
+                sapi.Network.GetChannel(Util.Modid)
+                    .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
+            }
         }
 
         /// Called when the server receives an update packet from a client
@@ -146,53 +161,17 @@ namespace TraderNotesTogether
                 return;
 
             cacheStore.UpdateTrader(packet.Trader.ToSavedTrader());
-            SendTraderUpdateToClient(packet.Trader.ToSavedTrader());
-        }
 
-        private void SendTraderUpdateToClient(IServerPlayer toPlayer, SavedTrader trader)
-        {
-            sapi.World.Logger.Debug(
-                Util.ModMessage(
-                    $"Sending update for trader {trader.EntityId} to {toPlayer.PlayerName}"
-                )
-            );
-            var packet = new TraderSyncPacket
-            {
-                Trader = ProtoTraderEntity.FromSavedTrader(trader),
-            };
-            if (!CanReceive(toPlayer))
-                return;
-
-            sapi.Network.GetChannel(Util.Modid).SendPacket(packet, toPlayer);
-        }
-
-        private void SendTraderUpdateToClient(SavedTrader trader)
-        {
-            var packet = new TraderSyncPacket
-            {
-                Trader = ProtoTraderEntity.FromSavedTrader(trader),
-            };
+            var newpacket = new TraderSyncPacket { Trader = packet.Trader };
             foreach (IServerPlayer player in sapi.World.AllOnlinePlayers)
             {
+                // Skip sending to the player who sent the update
+                if (player.PlayerUID == fromPlayer.PlayerUID)
+                    continue;
                 if (!CanReceive(player))
                     continue;
 
                 sapi.Network.GetChannel(Util.Modid).SendPacket(packet, player);
-            }
-        }
-
-        public void SendBulkUpdateToPlayer(IServerPlayer player)
-        {
-            var snapshots = cacheStore
-                .Cache.Values.Select(ProtoTraderEntity.FromSavedTrader)
-                .ToList();
-            if (snapshots.Count > 0)
-            {
-                sapi.World.Logger.Debug(
-                    Util.ModMessage($"Sending {player.PlayerName} bulk update")
-                );
-                sapi.Network.GetChannel(Util.Modid)
-                    .SendPacket(new TraderBulkSyncPacket { Traders = snapshots }, player);
             }
         }
 
