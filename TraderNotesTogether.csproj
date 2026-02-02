@@ -19,6 +19,14 @@
       <HintPath>$(VS_MODDING)/Reference/TraderNotes/TraderNotes.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="ProtoBuf">
+      <HintPath>$(VINTAGE_STORY)/Lib/protobuf-net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NewtonJson">
+      <HintPath>$(VINTAGE_STORY)/Lib/Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -31,11 +39,7 @@
     <None Include="modicon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-  </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="protobuf-net" Version="3.2.56" />
   </ItemGroup>
 
 </Project>

@@ -14,8 +14,7 @@
 *.userosscache
 *.sln.docstates
 run-game
-build-debug
-build-release
+build*
 test-release
 .editorconfig
 upload
