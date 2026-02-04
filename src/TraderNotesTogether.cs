@@ -57,7 +57,7 @@ namespace TraderNotesTogether
                 Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
             );
             TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
-            capi.Logger.Chat(
+            capi.ShowChatMessage(
                 $"Received update for {packet.Trader.Name} @ <{packet.Trader.X},{packet.Trader.Z}>"
             );
         }
@@ -70,7 +70,7 @@ namespace TraderNotesTogether
                     $"Received bulk update for traders {string.Join(",", packet.Traders.Select(trader => trader.EntityId))}"
                 )
             );
-            capi.Logger.Chat($"Received bulk update for {packet.Traders.Count} traders.");
+            capi.ShowChatMessage($"Received bulk update for {packet.Traders.Count} traders.");
             foreach (ProtoTraderEntity trader in packet.Traders)
             {
                 if (
