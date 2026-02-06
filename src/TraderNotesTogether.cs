@@ -57,9 +57,9 @@ namespace TraderNotesTogether
                 Util.ModMessage($"Recieved update for trader {packet.Trader.EntityId}")
             );
             TraderMapMod.Cache[packet.Trader.EntityId] = packet.Trader.ToSavedTrader();
-            capi.ShowChatMessage(
-                $"Received update for {packet.Trader.Name} @ <{packet.Trader.X},{packet.Trader.Z}>"
-            );
+            var tx = Math.Floor(packet.Trader.X);
+            var tz = Math.Floor(packet.Trader.Z);
+            capi.ShowChatMessage($"Received update for {packet.Trader.Name} @ <{tx},{tz}>");
         }
 
         /// Called when the client receives a bulk sync packet from the server (usually on initially joining a world)
@@ -84,7 +84,6 @@ namespace TraderNotesTogether
         /// Called when the client processes a scheduled tick
         private void OnClientTick(float dt)
         {
-            capi.Logger.Debug(Util.ModMessage($"Client Tick {dt}"));
             cacheObserver.Tick(dt);
         }
 
@@ -211,13 +210,22 @@ namespace TraderNotesTogether
             this.capi = capi;
         }
 
+        private bool IsDialog(GuiDialog g)
+        {
+            return g.DialogType == EnumDialogType.Dialog;
+        }
+
         public void Tick(float dt)
         {
             var cache = TraderMapMod.Cache;
             if (cache == null)
-            {
                 return;
-            }
+            // Don't update if the client has a dialog open
+            // Prevets spamming other clients when the trader dialog is open and updating constantly
+            // Other ideas were to compare the contents of the trader, but this seems more efficient
+            if (capi.Gui.OpenedGuis.Any(IsDialog))
+                return;
+
             foreach (var trader in cache.Values.ToList())
             {
                 if (
